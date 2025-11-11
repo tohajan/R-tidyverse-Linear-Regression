@@ -1,0 +1,721 @@
+---
+title: "Depression_LinReg"
+author: "Toheeb"
+date: "`r Sys.Date()`"
+output: rmarkdown::github_document
+---
+
+
+```{r}
+library(haven) #contains the read_dta function
+library(tidyverse) #contains many of the functions to be used in regression modeling, and dplyr
+library(rsample) 
+library(naniar)
+library(skimr)
+library(PerformanceAnalytics)
+library(recipes)
+library(parsnip)
+library(workflows)
+library(yardstick)
+library(ggplot2)
+library(tune)
+library(broom)
+library(MASS)
+```
+
+## Exploratory Data Analysis
+### Depression data
+```{r}
+dep <- read_dta("C:/Users/tohaj/Desktop/DS-Projects/data files/depression.dta")
+```
+
+```{r}
+dim(dep)
+```
+
+```{r}
+tail(dep,100)
+```
+
+```{r}
+# check the unique values in each column of the data
+unique_value <- function(data){
+  for (i in data) {
+    print(unique(i))
+  }
+}
+
+# unique_value(dep)
+```
+
+
+```{r}
+#recode 7's and 9's as missing
+dep[dep==7 | dep==9] <- NA
+```
+
+```{r}
+#recheck the unique values
+# unique_value(dep)
+```
+ 
+
+```{r}
+#create a new column for depression score
+dep$dep_score <- rowSums(dep[, c("dpq010","dpq020","dpq030","dpq040","dpq050",
+                                 "dpq060","dpq070","dpq080","dpq090")], na.rm = TRUE)
+```
+
+```{r}
+#retain only ID and depression score columns
+depression <- dep[,c(1,12)]
+head(depression)
+```
+
+### Demographics data
+```{r}
+dem <- read_dta("C:/Users/tohaj/Desktop/DS-Projects/data files/demographics.dta")
+head(dem)
+dim(dem)
+```
+
+
+```{r}
+demographics <- dem[, c("seqn", "riagendr", "ridageyr", "ridreth3", 
+                        "dmdeduc2", "dmdmartz")]
+head(demographics)
+```
+
+Demographics code book/dictionary:  
+riagendr (Sex): 1=male, 2=female  
+riadageyr (Age): 0-79; 80=80yrs and older
+ridreth3 (race/ethnicity): 1=Mex. American, 2=Other Hispanic, 3=NH White, 4=NH Black, 6=NH Asian, 7= Other race  
+dmdeduc2 (education level): 1=less than 9th grade, 2=9-11th grade, 3=HS Graduate/GED equiv, 4=some college or AA degree, 5=College graduate or above, 7=Refused, 9=Don't know  
+dmdmartz (marital status): 1=married/living with partner, 2=widowed/divorced/separated, 3=never married, 77=Refused, 99=Don't know
+
+
+```{r}
+#rename columns
+demo <- demographics %>%
+  rename(
+    sex = riagendr,
+    age = ridageyr,
+    race_eth = ridreth3,
+    educ = dmdeduc2,
+    marital = dmdmartz
+  )
+
+# unique_value(demo)
+```
+
+```{r}
+head(demo)
+```
+
+
+```{r}
+#recode "refused" and "unknown" as missing values
+demo_recode <- demo %>%
+  mutate(
+    educ = na_if(educ,7),
+    educ = na_if(educ,9),
+    marital = na_if(marital,77),
+    marital = na_if(marital,99)
+  )
+
+# check that the recoding worked
+unique(demo_recode["educ"])
+unique(demo_recode["marital"])
+```
+
+
+
+```{r}
+#recode values in other columns
+demo_recode <- demo_recode %>%
+  mutate(
+    race_eth = case_when(
+      race_eth == 2 ~ 1, # Hispanic
+      race_eth == 3 ~ 2, # NH White
+      race_eth == 4 ~ 3, # NH Black
+      race_eth == 6 ~ 4, # NH Asian
+      race_eth == 7 ~ 5, # Others
+      TRUE ~ race_eth # retains other values as is 
+    )
+  )
+
+# check
+unique(demo_recode$race_eth)
+```
+
+
+```{r}
+#check data type of each column
+sapply(demo_recode, class) 
+#can also use "str(df)" for the same task
+```
+
+
+
+```{r}
+#convert categorical variables to factor type, and label accordingly
+demogr_final <- demo_recode %>%
+  mutate(
+    sex = factor(sex,
+                 levels=c(1,2),
+                 labels=c("M", "F")), 
+  #NB: the first level in the list will be the reference level when one_hot argument is set to False (later in the step_dummy function)
+    race_eth = factor(race_eth,
+                      levels = c(2, 1, 3, 4, 5),
+                      labels=c("NHWhite", "Hispanic", "NHBlack", "NHAsian", "Others")),
+    educ = factor(educ,
+                  levels=c(3, 1, 2, 4, 5),
+                  labels=c("HS/GED", "<9th grade", "9-11th grade", "some college", ">= college grad")),
+    marital = factor(marital,
+                     levels=c(1,2,3),
+                     labels=c("mard./liv. w/part", "wid./div./sep.", "nev. mard."))
+  )
+
+#Check:
+sapply(demogr_final, class) 
+```
+
+
+```{r}
+head(demogr_final)
+```
+
+### Physical activity data
+
+```{r}
+phys_act <- read_dta("C:/Users/tohaj/Desktop/DS-Projects/data files/physical-activity.dta")
+```
+
+
+```{r}
+head(phys_act)
+```
+
+paq665 (this variable captures whether respondent engaged in any moderate-intensity sports, fitness, or recreational activities that cause a small increase in breathing or heart rate such as brisk walking, bicycling, swimming, or volleyball for at least 10 minutes continuously?): 1=yes, 2=no
+
+```{r}
+#subset only the needed columns
+physAct <- phys_act[, c("seqn", "paq665")]
+head(physAct)
+```
+
+```{r}
+#rename variable
+physAct <- physAct %>%
+  rename(physact = paq665)
+
+sapply(physAct, class)
+```
+
+
+
+```{r}
+#recode values as needed
+physAct <- physAct %>%
+  mutate(
+    physact = case_when(
+      physact == 7~NA,
+      physact == 9 ~ NA,
+      TRUE ~ physact),
+    physact = factor(physact,
+                     levels=c(1,2),
+                     labels=c("Active", "Inactive"))
+  )
+
+unique(physAct$physact)
+head(physAct)
+```
+
+### Alcohol use data
+```{r}
+drink <- read_dta("C:/Users/tohaj/Desktop/DS-Projects/data files/alcohol-use.dta")
+
+head(drink)
+```
+
+alq130: Average number of alcoholic drinks per day in the past 12 mos
+
+```{r}
+#obtain only the needed columns
+drinking <- drink[, c("seqn", "alq130")]
+names(drinking)[names(drinking) == "alq130"] <- "alc_drinks"
+head(drinking)
+```
+
+
+
+```{r}
+#recode values
+drinking[drinking == 777 | drinking == 999] <- NA
+```
+
+
+### Cigarette use
+```{r}
+smoking <- read_dta("C:/Users/tohaj/Desktop/DS-Projects/data files/cigarette-use.dta")
+
+head(smoking)
+```
+
+
+```{r}
+#obtain needed columns
+cig_use <- smoking[, c("seqn", "smq020")]
+
+#rename column
+names(cig_use)[names(cig_use) == "smq020"] <- "cig100"
+```
+
+smq020: captures whether respondent has ever smoked at least 100 cigarettes
+
+```{r}
+#recode values as needed
+cig_use <- cig_use %>%
+  mutate(
+    cig100 = case_when(
+      cig100 == 7~NA,
+      cig100 == 9 ~ NA,
+      TRUE ~ cig100),
+    cig100 = factor(cig100,
+                     levels=c(1,2),
+                     labels=c("Yes", "No"))
+  )
+
+unique(cig_use$cig100)
+head(cig_use)
+```
+
+
+### BMI
+```{r}
+bmi <- read_xpt("C:/Users/tohaj/Desktop/DS-Projects/data files/p_bmx.xpt")
+
+head(bmi)
+```
+
+bmxbmi: body mass index in kg per meter-squared
+
+```{r}
+#obtain the columns of interest
+bmi_data <- bmi[, c("SEQN","BMXBMI")]
+
+#rename column
+names(bmi_data)[names(bmi_data) == "SEQN"] <- "seqn"
+names(bmi_data)[names(bmi_data) == "BMXBMI"] <- "bmi"
+
+head(bmi_data)
+```
+
+
+### Sleep
+
+```{r}
+sleep <- read_dta("C:/Users/tohaj/Desktop/DS-Projects/data files/sleep-disorder.dta")
+
+head(sleep)
+```
+
+sld012 (Number of hours usually sleep on weekdays or workdays): 3-13.5=range of values, 2=less than 3 hrs, 14=13hours or more.
+
+```{r}
+#obtain only the needed columns
+sleep_data <- sleep[, c("seqn","sld012")]
+
+#rename column
+names(sleep_data)[names(sleep_data) == "sld012"] <- "sleep_hrs"
+
+head(sleep_data)
+```
+
+
+### Merge data
+```{r}
+data_list <- list(depression,demogr_final,physAct,
+                                   drinking,cig_use,bmi_data,sleep_data)
+nhanes_2017_Mar2020 <- reduce(data_list, full_join, by="seqn")
+
+head(nhanes_2017_Mar2020)
+```
+
+
+### Check for missing values and patterns
+#### Missing values
+
+```{r}
+#get the data shape
+dim(nhanes_2017_Mar2020)
+```
+
+
+```{r}
+glimpse(nhanes_2017_Mar2020)
+```
+
+```{r}
+skim(nhanes_2017_Mar2020)
+```
+
+
+```{r}
+#check number of missing values in each column
+nhanes_2017_Mar2020 %>% 
+  map(is.na) %>%
+  map(sum)
+```
+
+```{r}
+#Plot the distribution of missingness across variables
+vis_miss(nhanes_2017_Mar2020)
+```
+
+```{r}
+nhanes_2017_Mar2020_nomissing <- nhanes_2017_Mar2020 %>% drop_na()
+
+dim(nhanes_2017_Mar2020_nomissing)
+```
+
+```{r}
+skim(nhanes_2017_Mar2020_nomissing)
+```
+
+
+#### Correlation
+
+```{r}
+nhanes_2017_Mar2020_nomissing %>% 
+  select_if(is.numeric) %>%
+  chart.Correlation()
+```
+
+
+
+#### Density Plot
+```{r}
+#Check the distribution of the DV: depression score
+ggplot(nhanes_2017_Mar2020_nomissing, aes(dep_score)) + geom_density()
+#the DV is not normally distributed
+```
+
+
+
+
+```{r}
+#Re-Check the distribution of the DV
+par(mfrow=c(2,2))
+ggplot(nhanes_2017_Mar2020_nomissing, aes(dep_score)) + geom_density() #raw value
+ggplot(nhanes_2017_Mar2020_nomissing, aes(log(dep_score))) + geom_density() #log transformation
+ggplot(nhanes_2017_Mar2020_nomissing, aes(sqrt(dep_score))) + geom_density() #square root transformation
+ggplot(nhanes_2017_Mar2020_nomissing, aes(sqrt(sqrt(dep_score)))) + geom_density() #4th root transformation
+```
+
+Results: There is no notable improvement in the curve shape (i.e., it doesn't move closer to normality), even after log, square root, and 4th root transformations.  
+
+Go ahead and build the model; run the assumption checks after.
+
+
+## Model A (With Raw DV)
+#### Split the data into training and test sets
+```{r}
+set.seed(58)
+nhanes_split <- initial_split(nhanes_2017_Mar2020_nomissing, prop = 3/4) # Assign 75% of the data for training set
+
+nhanes_split # count of training vs. test vs total
+```
+
+```{r}
+train_nhanes <- training(nhanes_split) #store training set
+test_nhanes <- testing(nhanes_split) #store test set
+```
+
+
+### Data preprocessing
+
+```{r}
+names(train_nhanes) #obtain the column/variable names in the training set
+```
+
+
+```{r}
+#specify variable roles (predictors vs outcome)
+dep_recipe <- train_nhanes %>%
+  recipe(dep_score ~ sex + age + race_eth + educ + marital + physact + alc_drinks + 
+           cig100 + bmi + sleep_hrs)
+
+dep_recipe
+# 1 outcome, 10 features/predictors
+```
+
+```{r}
+summary(dep_recipe)
+```
+
+In the above output, <chr[3]> and <chr[2> denote character and numeric types, respectively.
+
+```{r}
+#dummy recode categorical predictors
+dep_recipe <- dep_recipe %>%
+  step_dummy(all_nominal_predictors(), one_hot = FALSE)
+#one_hot=FALSE: omits the first dummy category (to serve as reference category) in each categorical predictor. In anticipation of this, the desired reference group was placed first when naming labels and levels (in the EDA section above).
+
+# Otherwise, one_hot=TRUE: omits no category, if no reference category is needed
+dep_recipe
+```
+
+
+#### Model specification
+
+```{r}
+ols_model <- linear_reg()
+```
+
+```{r}
+ols_model <- ols_model %>% 
+  set_engine("lm") %>%
+  set_mode("regression")
+
+ols_model
+```
+
+
+#### Simulate the preprocessing
+```{r}
+recipe_prepped <- prep(dep_recipe, verbose = TRUE, retain = TRUE)
+recipe_prepped
+```
+
+
+```{r}
+prepped_train <- bake(recipe_prepped, new_data = NULL)
+glimpse(prepped_train)
+```
+
+
+#### Model Fitting
+```{r}
+ols_workflow <- workflow() %>%
+  add_recipe(dep_recipe) %>%
+  add_model(ols_model)
+
+ols_workflow
+```
+
+```{r}
+#Now estimate the model parameters/constants using the training data, i.e., fit the model using the data
+ols_fit <- fit(ols_workflow, data=train_nhanes)
+
+ols_fit
+```
+
+
+#### Model Evaluation
+```{r}
+ols_fitstats <- ols_fit %>%
+  extract_fit_parsnip()
+
+head(ols_fitstats$fit$fitted.values)
+```
+
+
+```{r}
+#use the fitted model to predict the test set
+predict(ols_fit, new_data = test_nhanes)
+```
+
+Get more information on the prediction/evaluation performance:
+```{r}
+ols_fitted_values <- augment(ols_fitstats$fit, data = prepped_train)
+```
+
+
+```{r}
+some_columns <- ols_fitted_values[, c("dep_score", ".fitted", ".std.resid")]
+some_columns
+```
+
+```{r}
+# obtain the actual rmse value
+rmse(ols_fitted_values, truth = dep_score, estimate = .fitted)
+```
+
+RMSE is 4.00 (pretty high), model appears to perform poorly. 
+
+Obtain a visual on model performance:
+```{r}
+ols_fitted_values %>%
+  ggplot(aes(x = dep_score, y = .fitted)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs( x = "True depression score", y = "Predicted depression score")
+```
+
+Try Boxcox transformation of the DV
+
+
+## Model B (Box-Cox-transformed DV)
+```{r}
+#apply the boxcox function
+#The function works only with positive values. Dv contains 0 values, so add a constant:
+nhanes_2017_Mar2020_nomissing["dep_modified"] <- nhanes_2017_Mar2020_nomissing$dep_score + 1
+# add 1 as a constant
+
+boxcox_trans <- boxcox(lm(dep_modified ~ sex + age + race_eth + educ + marital + physact + alc_drinks + 
+           cig100 + bmi + sleep_hrs, data = nhanes_2017_Mar2020_nomissing), 
+           lambda = seq(-2,2,0.1))
+```
+
+```{r}
+#Determine the optimal lambda value
+lambda_opt <- boxcox_trans$x[which.max(boxcox_trans$y)]
+lambda_opt
+```
+
+```{r}
+#add a new column containing the transformed value of the Dv
+nhanes_2017_Mar2020_nomissing$dep_boxcox <- 
+  ifelse(lambda_opt==0,
+         log(nhanes_2017_Mar2020_nomissing$dep_modified),
+         (nhanes_2017_Mar2020_nomissing$dep_modified ^ lambda_opt - 1) / lambda_opt)
+
+# View(nhanes_2017_Mar2020_nomissing)
+# the transformed DV values are the same (=0)
+# this may be due to the lambda optimal value (-0.1818182) being close to zero. Try log instead
+```
+
+
+## Model C (Log-transformed DV)
+```{r}
+nhanes_2017_Mar2020_nomissing$dep_log <- log(nhanes_2017_Mar2020_nomissing$dep_modified)
+nhanes_log <- nhanes_2017_Mar2020_nomissing[c(1,3:12,15)]
+names(nhanes_log)
+```
+
+#### Split the data into training and test sets
+```{r}
+set.seed(58)
+nhanes_log_split <- initial_split(nhanes_log, prop = 3/4) #75% for training set
+
+nhanes_log_split # count of training vs. test vs total
+```
+
+```{r}
+train_nhanes_log <- training(nhanes_log_split)
+test_nhanes_log <- testing(nhanes_log_split)
+```
+
+
+### Data preprocessing
+
+```{r}
+names(train_nhanes_log)
+```
+
+
+```{r}
+#specify variable roles (predictors vs outcome)
+log_recipe <- train_nhanes_log %>%
+  recipe(dep_log ~ sex + age + race_eth + educ + marital + physact + alc_drinks + 
+           cig100 + bmi + sleep_hrs)
+
+log_recipe
+# 1 outcome, 10 features/predictors
+```
+
+
+```{r}
+summary(log_recipe)
+```
+
+In the above output, <chr[3]> and <chr[2> denote character and numeric types, respectively.
+
+```{r}
+#dummy recode categorical predictors
+log_recipe <- log_recipe %>%
+  step_dummy(all_nominal_predictors(), one_hot = FALSE)
+
+log_recipe
+```
+
+
+#### Model specification
+
+```{r}
+log_OLSmodel <- linear_reg()
+```
+
+```{r}
+log_OLSmodel <- log_OLSmodel %>% 
+  set_engine("lm") %>%
+  set_mode("regression")
+
+log_OLSmodel
+```
+
+
+#### Simulate the preprocessing
+```{r}
+LOGrecipe_prepped <- prep(log_recipe, verbose = TRUE, retain = TRUE)
+LOGrecipe_prepped
+```
+
+
+```{r}
+LOGprepped_train <- bake(LOGrecipe_prepped, new_data = NULL)
+glimpse(LOGprepped_train)
+```
+
+
+#### Model Fitting
+```{r}
+log_workflow <- workflow() %>%
+  add_recipe(log_recipe) %>%
+  add_model(log_OLSmodel)
+
+log_workflow
+```
+
+```{r}
+#Now estimate the model parameters/constants using the training data
+logOLS_fit <- fit(log_workflow, data=train_nhanes_log)
+
+logOLS_fit
+```
+
+
+#### Model Evaluation
+```{r}
+LOGols_fitstats <- logOLS_fit %>%
+  extract_fit_parsnip()
+
+head(LOGols_fitstats$fit$fitted.values)
+```
+
+
+```{r}
+predict(ols_fit, new_data = test_nhanes)
+```
+
+Get more information on the prediction/evaluation performance:
+```{r}
+LOGols_fitted_values <- augment(LOGols_fitstats$fit, data = LOGprepped_train)
+```
+
+
+```{r}
+check <- LOGols_fitted_values[, c("dep_log", ".fitted", ".std.resid")]
+check
+```
+
+```{r}
+# obtain the actual rmse value
+rmse(LOGols_fitted_values, truth = dep_log, estimate = .fitted)
+```
+
+RMSE is 0.85, much more lower than the initial value of 4.00 (from the model with raw DV). Model appears to have improved tremendously with log transformation
+
+
+
