@@ -20,6 +20,8 @@ out-of-sample accuracy. Predictive limits likely reflect unmeasured factors, mea
 nonlinear relationships. Future steps include multiple imputation, nonlinear learners (e.g., 
 XGBoost, Random), and model-agnostic interpretability tools (PDP, SHAP) for transparent insights.
 
+---
+
 ### Methods
 All analyses were conducted in R (version 4.4 +) using the `tidymodels` framework for data 
 preprocessing, model training, and validation. Continuous variables were normalized using the 
@@ -28,3 +30,12 @@ wrangling and visualization relied on `dplyr`, `ggplot2`, and related `tidyverse
 scripts were version-controlled and documented to ensure reproducibility of the analytic workflow 
 and results.
 
+---
+## Repository Structure
+├── Predicting-Depression-Severity_files/figure-gfm/ # Auto-generated plots  
+├── data/ # Source dataset  
+├── .gitignore  
+├── Predicting Depression Severity.Rmd # Main notebook (.Rmd version)  
+├── Predicting-Depression-Severity.md # Main notebook (for GitHub rendering)  
+├── R-tidyverse-Linear-Regression.Rproj # manages the project in RStudio  
+└── README.md # Overview + documentation
