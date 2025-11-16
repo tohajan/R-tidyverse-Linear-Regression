@@ -2,19 +2,32 @@
 title: "Depression Score Prediction Analysis"
 author: "Toheeb"
 date: "`r Sys.Date()`"
-output: rmarkdown::github_document
+output:
+  github_document:
+    toc: true
+    toc_depth: 3
+  html_document:
+    toc: true
+    toc_depth: 3
+    theme: cosmo
 analysis_goal: "to predict depression score among US adults"
 method: "linear regression"
 data_source: "NHANES 2017-March 2020 data"
 ---
+
 ```{r Setup & package loading}
 if (!requireNamespace("pacman", quietly = TRUE)) install.packages("pacman")
 
 pacman::p_load(
-  here, haven, tidyverse, mice, rsample, naniar, skimr, recipes, parsnip, workflows, tune, yardstick, broom, GGally, glmnet, dials, doParallel, car, lmtest, sessioninfo
+  here, haven, tidyverse, rsample, naniar, skimr, recipes, parsnip, workflows, tune, yardstick, broom, GGally, glmnet, dials, doParallel, car, lmtest, sessioninfo
 )
 ```
 
+```{r}
+conflicted::conflict_prefer("select", "dplyr")
+conflicted::conflict_prefer("filter", "dplyr")
+```
+The `conflicted` package ensures functions from core packages (e.g., `dplyr::filter`) are used consistently.
 
 # Context & Goal
 This notebook builds and evaluates linear regression models predicting a depression score derived from DPQ items (PHQ-9 depression scale) in NHANES 2017-March 2020 data. It is annotated with explanations about modeling choices, reproducible preprocessing using recipes, diagnostic checks, and a short example of hyperparameter tuning (elastic net) to illustrate regularization for predictive modeling.
@@ -120,7 +133,7 @@ depression_cleaned <- depression %>%
   ) %>%
   ungroup() %>%
   filter(!is.na(dep_score)) %>% 
-  dplyr::select(seqn, dep_score)
+  select(seqn, dep_score)
 ```
 
 Why use person-mean imputation? Following established PHQ-9 scoring procedures, this approach is suitable when the missingness is below 20%. Participants with fewer than 3 missing PHQ-9 items had missing values replaced using individual mean imputation. Cases with 3 or more missing items were excluded from depression score computation. For more on person-mean imputation in PHQ-9 scoring, see [Rezvan et al.,2022](https://pmc.ncbi.nlm.nih.gov/articles/PMC9718541/) and [Shrive et al., 2006](https://bmcmedresmethodol.biomedcentral.com/articles/10.1186/1471-2288-6-57).
@@ -133,7 +146,7 @@ Click [here](https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2017/DataFiles/DEMO_J.
 ```{r}
 # Subset variables of interest
 demographics <- demographics %>% 
-  dplyr::select(seqn, riagendr, ridageyr, ridreth3, dmdeduc2, dmdmartz)
+  select(seqn, riagendr, ridageyr, ridreth3, dmdeduc2, dmdmartz)
 ```
 
 ```{r}
@@ -204,7 +217,7 @@ dim(demographics_cleaned)
 * Physical activity: Click [here](https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2017/DataFiles/PAQ_J.htm) for description of physical activity variables.
 ```{r}
 physical_activity <- physical_activity %>% 
-  dplyr::select(seqn, paq665) %>% #paq665: moderate-level physical activity
+  select(seqn, paq665) %>% #paq665: moderate-level physical activity
   rename(physact = paq665) %>%
   mutate(physact = case_when(physact == 7 ~ NA_real_, physact == 9 ~ NA_real_, 
                              TRUE ~ as.numeric(physact)),
@@ -215,7 +228,7 @@ physical_activity <- physical_activity %>%
 * Alcohol use: average number drinks per day. Click [here](https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2017/DataFiles/ALQ_J.htm) for the variable's description.
 ```{r}
 drinking <- drinking %>% 
-  dplyr::select(seqn, alq130) %>% #alq130: Average number of alcoholic drinks per day in the past 12 mos
+  select(seqn, alq130) %>% #alq130: Average number of alcoholic drinks per day in the past 12 mos
   rename(alc_drinks = alq130) %>%
   mutate(alc_drinks = if_else(alc_drinks %in% c(777, 999), NA_real_, as.numeric(alc_drinks)))
 ```
@@ -224,7 +237,7 @@ drinking <- drinking %>%
 * Cigarette use: Click [here](https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2017/DataFiles/SMQ_J.htm) for the variable description
 ```{r}
 smoking <- smoking %>% 
-  dplyr::select(seqn, smq020) %>% #smq020: whether respondent has ever smoked at least 100 cigarettes
+  select(seqn, smq020) %>% #smq020: whether respondent has ever smoked at least 100 cigarettes
   rename(cig100 = smq020) %>%
   mutate(cig100 = case_when(cig100 == 7 ~ NA_real_, cig100 == 9 ~ NA_real_, TRUE ~ as.numeric(cig100)),
          cig100 = factor(cig100, levels = c(1,2), labels = c("Yes","No")))
@@ -235,7 +248,7 @@ smoking <- smoking %>%
 [here](https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2017/DataFiles/SLQ_J.htm) for variable description.
 ```{r}
 sleeping <- sleeping %>% 
-  dplyr::select(seqn, sld012) %>% #sld012: Number of hours of sleep daily
+  select(seqn, sld012) %>% #sld012: Number of hours of sleep daily
   rename(sleep_hrs = sld012) %>% 
   mutate(sleep_hrs = as.numeric(sleep_hrs))
 ```
@@ -243,7 +256,7 @@ sleeping <- sleeping %>%
 * BMI (body mass index, measured in kg/m^2^)
 ```{r}
 bmi <- bmi %>% 
-  dplyr::select(seqn, BMXBMI) %>% 
+  select(seqn, BMXBMI) %>% 
   rename(bmi = BMXBMI) %>% 
   mutate(bmi = as.numeric(bmi))
 ```
@@ -314,7 +327,7 @@ For modeling, we'll illustrate median/mode imputation via recipes applied on tra
 ```{r}
 # Correlation among numeric columns
 nhanes_combined %>% 
-  dplyr::select(where(is.numeric)) %>% 
+  select(where(is.numeric)) %>% 
   GGally::ggpairs()
 ```
 
@@ -406,7 +419,7 @@ ols_fit
 # Generate predictions for the test data, and arrange the output in a 2-column table containing the predicted and actual values (of dep_score)
 test_preds <- predict(ols_fit, new_data = test) %>%
   bind_cols(test %>% 
-              dplyr::select(dep_score))
+              select(dep_score))
 ```
 
 
@@ -542,7 +555,7 @@ yj_fit  <- fit(yj_wf, data = train)
 # Generate predictions for the test data
 test_yj_preds <- predict(yj_fit, new_data = test) %>%
   bind_cols(test %>% 
-              dplyr::select(dep_score_yj, dep_score))
+              select(dep_score_yj, dep_score))
 ```
 
 ```{r}
@@ -618,7 +631,7 @@ log_fit <- fit(log_wf, data = train)
 # Generate predictions for test data
 test_log_preds <- predict(log_fit, new_data = test) %>%
   bind_cols(test %>% 
-              dplyr::select(dep_score, dep_score_log))
+              select(dep_score, dep_score_log))
 ```
 
 
@@ -760,7 +773,7 @@ final_fit_enet <- fit(final_enet, data = train)
 # Evaluate ENet on held-out test set (use same test used for Models A–C)
 test_enet_preds <- predict(final_fit_enet, new_data = test) %>%
   bind_cols(test %>% 
-              dplyr::select(dep_score))
+              select(dep_score))
 ```
 
 

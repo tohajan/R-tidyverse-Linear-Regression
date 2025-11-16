@@ -1,15 +1,77 @@
 Depression Score Prediction Analysis
 ================
 Toheeb
-2025-11-14
+2025-11-16
+
+- [Context & Goal](#context--goal)
+- [Exploratory Data Anlysis](#exploratory-data-anlysis)
+  - [Data Import](#data-import)
+  - [Compute depression sum score (from the DPQ
+    variables)](#compute-depression-sum-score-from-the-dpq-variables)
+  - [Demographics — cleaning & factor
+    creation](#demographics--cleaning--factor-creation)
+  - [Select and clean other variables (physical activity, alcohol,
+    smoking, BMI,
+    sleep)](#select-and-clean-other-variables-physical-activity-alcohol-smoking-bmi-sleep)
+  - [Merge: anchor to demographics using
+    `left_join`](#merge-anchor-to-demographics-using-left_join)
+  - [Missingness exploration](#missingness-exploration)
+  - [Exploratory numeric checks &
+    correlation](#exploratory-numeric-checks--correlation)
+- [Modeling: consistent pattern for all
+  models](#modeling-consistent-pattern-for-all-models)
+  - [Model A — OLS on raw outcome (for
+    baseline)](#model-a--ols-on-raw-outcome-for-baseline)
+    - [Train/test split](#traintest-split)
+    - [Recipe: imputation + dummies (applied to training set
+      only)](#recipe-imputation--dummies-applied-to-training-set-only)
+    - [Model specification & fit (OLS)](#model-specification--fit-ols)
+    - [Fit model to the held-out test
+      set](#fit-model-to-the-held-out-test-set)
+    - [Evaluate model performance](#evaluate-model-performance)
+  - [Model B — Box-Cox-Transformed
+    Outcome](#model-b--box-cox-transformed-outcome)
+    - [Quick summary on Model B: Box-Cox-transformed
+      outcome](#quick-summary-on-model-b-box-cox-transformed-outcome)
+  - [Model B.2 — Yeo-Johnson-Transformed
+    Outcome](#model-b2--yeo-johnson-transformed-outcome)
+    - [Quick summary on Model B.2: Yeo–Johnson-transformed
+      outcome](#quick-summary-on-model-b2-yeojohnson-transformed-outcome)
+  - [Model C — Log-transformed
+    Outcome](#model-c--log-transformed-outcome)
+    - [Quick summary on Model C: Log-transformed
+      outcome](#quick-summary-on-model-c-log-transformed-outcome)
+- [Cross-Validation, Regularization, Interpretability, and Final
+  Reflection](#cross-validation-regularization-interpretability-and-final-reflection)
+  - [Cross-Validation — OLS Stability & Baseline
+    Comparison](#cross-validation--ols-stability--baseline-comparison)
+  - [Regularized Alternative — Elastic Net
+    (`glmnet`)](#regularized-alternative--elastic-net-glmnet)
+    - [Final Reflection](#final-reflection)
+  - [Reproducibility & Session Info](#reproducibility--session-info)
 
 ``` r
 if (!requireNamespace("pacman", quietly = TRUE)) install.packages("pacman")
 
 pacman::p_load(
-  here, haven, tidyverse, mice, rsample, naniar, skimr, recipes, parsnip, workflows, tune, yardstick, broom, GGally, glmnet, dials, doParallel, car, lmtest, sessioninfo
+  here, haven, tidyverse, rsample, naniar, skimr, recipes, parsnip, workflows, tune, yardstick, broom, GGally, glmnet, dials, doParallel, car, lmtest, sessioninfo
 )
 ```
+
+``` r
+conflicted::conflict_prefer("select", "dplyr")
+```
+
+    ## [conflicted] Will prefer dplyr::select over any other package.
+
+``` r
+conflicted::conflict_prefer("filter", "dplyr")
+```
+
+    ## [conflicted] Will prefer dplyr::filter over any other package.
+
+The `conflicted` package ensures functions from core packages (e.g.,
+`dplyr::filter`) are used consistently.
 
 # Context & Goal
 
@@ -202,7 +264,7 @@ depression_cleaned <- depression %>%
   ) %>%
   ungroup() %>%
   filter(!is.na(dep_score)) %>% 
-  dplyr::select(seqn, dep_score)
+  select(seqn, dep_score)
 ```
 
 Why use person-mean imputation? Following established PHQ-9 scoring
@@ -226,7 +288,7 @@ factors.
 ``` r
 # Subset variables of interest
 demographics <- demographics %>% 
-  dplyr::select(seqn, riagendr, ridageyr, ridreth3, dmdeduc2, dmdmartz)
+  select(seqn, riagendr, ridageyr, ridreth3, dmdeduc2, dmdmartz)
 ```
 
 ``` r
@@ -318,7 +380,7 @@ dim(demographics_cleaned)
 
 ``` r
 physical_activity <- physical_activity %>% 
-  dplyr::select(seqn, paq665) %>% #paq665: moderate-level physical activity
+  select(seqn, paq665) %>% #paq665: moderate-level physical activity
   rename(physact = paq665) %>%
   mutate(physact = case_when(physact == 7 ~ NA_real_, physact == 9 ~ NA_real_, 
                              TRUE ~ as.numeric(physact)),
@@ -331,7 +393,7 @@ physical_activity <- physical_activity %>%
 
 ``` r
 drinking <- drinking %>% 
-  dplyr::select(seqn, alq130) %>% #alq130: Average number of alcoholic drinks per day in the past 12 mos
+  select(seqn, alq130) %>% #alq130: Average number of alcoholic drinks per day in the past 12 mos
   rename(alc_drinks = alq130) %>%
   mutate(alc_drinks = if_else(alc_drinks %in% c(777, 999), NA_real_, as.numeric(alc_drinks)))
 ```
@@ -342,7 +404,7 @@ drinking <- drinking %>%
 
 ``` r
 smoking <- smoking %>% 
-  dplyr::select(seqn, smq020) %>% #smq020: whether respondent has ever smoked at least 100 cigarettes
+  select(seqn, smq020) %>% #smq020: whether respondent has ever smoked at least 100 cigarettes
   rename(cig100 = smq020) %>%
   mutate(cig100 = case_when(cig100 == 7 ~ NA_real_, cig100 == 9 ~ NA_real_, TRUE ~ as.numeric(cig100)),
          cig100 = factor(cig100, levels = c(1,2), labels = c("Yes","No")))
@@ -354,7 +416,7 @@ smoking <- smoking %>%
 
 ``` r
 sleeping <- sleeping %>% 
-  dplyr::select(seqn, sld012) %>% #sld012: Number of hours of sleep daily
+  select(seqn, sld012) %>% #sld012: Number of hours of sleep daily
   rename(sleep_hrs = sld012) %>% 
   mutate(sleep_hrs = as.numeric(sleep_hrs))
 ```
@@ -363,7 +425,7 @@ sleeping <- sleeping %>%
 
 ``` r
 bmi <- bmi %>% 
-  dplyr::select(seqn, BMXBMI) %>% 
+  select(seqn, BMXBMI) %>% 
   rename(bmi = BMXBMI) %>% 
   mutate(bmi = as.numeric(bmi))
 ```
@@ -521,7 +583,7 @@ recipe-based imputation.
 vis_miss(nhanes_combined)
 ```
 
-![](Predicting-Depression-Severity_files/figure-gfm/unnamed-chunk-25-1.png)<!-- -->
+![](Predicting-Depression-Severity_files/figure-gfm/unnamed-chunk-26-1.png)<!-- -->
 
 ``` r
 # Show how many rows would remain if we dropped any NA
@@ -586,7 +648,7 @@ applied on training data.
 ``` r
 # Correlation among numeric columns
 nhanes_combined %>% 
-  dplyr::select(where(is.numeric)) %>% 
+  select(where(is.numeric)) %>% 
   GGally::ggpairs()
 ```
 
@@ -682,14 +744,14 @@ nhanes_combined %>%
     ## Warning: Removed 2423 rows containing non-finite outside the scale range
     ## (`stat_density()`).
 
-![](Predicting-Depression-Severity_files/figure-gfm/unnamed-chunk-28-1.png)<!-- -->
+![](Predicting-Depression-Severity_files/figure-gfm/unnamed-chunk-29-1.png)<!-- -->
 
 ``` r
 # Dependent variable distribution
 ggplot(nhanes_combined, aes(dep_score)) + geom_density(na.rm = TRUE) + labs(title = 'Depression score distribution')
 ```
 
-![](Predicting-Depression-Severity_files/figure-gfm/unnamed-chunk-29-1.png)<!-- -->
+![](Predicting-Depression-Severity_files/figure-gfm/unnamed-chunk-30-1.png)<!-- -->
 
 Results: depression score is not normally distributed
 
@@ -881,7 +943,7 @@ ols_fit
 # Generate predictions for the test data, and arrange the output in a 2-column table containing the predicted and actual values (of dep_score)
 test_preds <- predict(ols_fit, new_data = test) %>%
   bind_cols(test %>% 
-              dplyr::select(dep_score))
+              select(dep_score))
 ```
 
 ### Evaluate model performance
@@ -930,7 +992,7 @@ ggplot(test_preds, aes(x = dep_score, y = .pred)) +
        x = "Observed dep_score", y = "Predicted dep_score")
 ```
 
-![](Predicting-Depression-Severity_files/figure-gfm/unnamed-chunk-39-1.png)<!-- -->
+![](Predicting-Depression-Severity_files/figure-gfm/unnamed-chunk-40-1.png)<!-- -->
 
 The funnel-shaped plot suggests severe non-normality /
 heteroscedasticity. The OLS assumptions seem heavily violated.
@@ -945,7 +1007,7 @@ par(mfrow = c(2, 2))
 plot(lm_obj)
 ```
 
-![](Predicting-Depression-Severity_files/figure-gfm/unnamed-chunk-40-1.png)<!-- -->
+![](Predicting-Depression-Severity_files/figure-gfm/unnamed-chunk-41-1.png)<!-- -->
 
 ``` r
 par(mfrow = c(1, 1))
@@ -974,7 +1036,7 @@ plot(cd, type = "h", main = "Cook's Distance")
 abline(h = 4/length(cd), col = "red", lty = 2)
 ```
 
-![](Predicting-Depression-Severity_files/figure-gfm/unnamed-chunk-42-1.png)<!-- -->
+![](Predicting-Depression-Severity_files/figure-gfm/unnamed-chunk-43-1.png)<!-- -->
 
 #### Diagnostics summary:
 
@@ -1078,7 +1140,7 @@ yj_fit  <- fit(yj_wf, data = train)
 # Generate predictions for the test data
 test_yj_preds <- predict(yj_fit, new_data = test) %>%
   bind_cols(test %>% 
-              dplyr::select(dep_score_yj, dep_score))
+              select(dep_score_yj, dep_score))
 ```
 
 ``` r
@@ -1179,7 +1241,7 @@ log_fit <- fit(log_wf, data = train)
 # Generate predictions for test data
 test_log_preds <- predict(log_fit, new_data = test) %>%
   bind_cols(test %>% 
-              dplyr::select(dep_score, dep_score_log))
+              select(dep_score, dep_score_log))
 ```
 
 ``` r
@@ -1377,7 +1439,7 @@ final_fit_enet <- fit(final_enet, data = train)
 # Evaluate ENet on held-out test set (use same test used for Models A–C)
 test_enet_preds <- predict(final_fit_enet, new_data = test) %>%
   bind_cols(test %>% 
-              dplyr::select(dep_score))
+              select(dep_score))
 ```
 
 - Evaluate model performance:
@@ -1455,7 +1517,7 @@ sessioninfo::session_info()
 
     ## Warning in system2("quarto", "-V", stdout = TRUE, env = paste0("TMPDIR=", :
     ## running command '"quarto"
-    ## TMPDIR=C:/Users/tohaj/AppData/Local/Temp/RtmpGgYfdA/filedce411175e68 -V' had
+    ## TMPDIR=C:/Users/tohaj/AppData/Local/Temp/RtmpYvtGMR/file27d47e696cf3 -V' had
     ## status 1
 
     ## ─ Session info ───────────────────────────────────────────────────────────────
@@ -1468,7 +1530,7 @@ sessioninfo::session_info()
     ##  collate  English_United States.utf8
     ##  ctype    English_United States.utf8
     ##  tz       America/New_York
-    ##  date     2025-11-14
+    ##  date     2025-11-16
     ##  pandoc   3.6.3 @ C:/Program Files/RStudio/resources/app/bin/quarto/bin/tools/ (via rmarkdown)
     ##  quarto   NA @ C:\\PROGRA~1\\RStudio\\RESOUR~1\\app\\bin\\quarto\\bin\\quarto.exe
     ## 
@@ -1478,14 +1540,15 @@ sessioninfo::session_info()
     ##  backports       1.4.1      2021-12-13 [1] CRAN (R 4.3.1)
     ##  base64enc       0.1-3      2015-07-28 [1] CRAN (R 4.3.1)
     ##  bestNormalize   1.9.1      2023-08-18 [1] CRAN (R 4.2.3)
-    ##  boot            1.3-28.1   2022-11-22 [2] CRAN (R 4.2.3)
     ##  broom         * 1.0.5      2023-06-09 [1] CRAN (R 4.3.2)
     ##  butcher         0.3.6      2025-08-18 [1] CRAN (R 4.2.0)
+    ##  cachem          1.0.8      2023-05-01 [1] CRAN (R 4.3.2)
     ##  car           * 3.1-2      2023-03-30 [1] CRAN (R 4.3.2)
     ##  carData       * 3.0-5      2022-01-06 [1] CRAN (R 4.3.2)
     ##  class           7.3-22     2023-05-03 [2] CRAN (R 4.2.3)
     ##  cli             3.6.2      2023-12-11 [1] CRAN (R 4.2.3)
     ##  codetools       0.2-19     2023-02-01 [2] CRAN (R 4.2.2)
+    ##  conflicted      1.2.0      2023-02-01 [1] CRAN (R 4.3.2)
     ##  data.table      1.14.10    2023-12-08 [1] CRAN (R 4.3.2)
     ##  dials         * 1.2.1      2024-02-22 [1] CRAN (R 4.2.3)
     ##  DiceDesign      1.10       2023-12-07 [1] CRAN (R 4.2.3)
@@ -1521,7 +1584,6 @@ sessioninfo::session_info()
     ##  htmltools       0.5.7      2023-11-03 [1] CRAN (R 4.2.3)
     ##  ipred           0.9-14     2023-03-09 [1] CRAN (R 4.2.3)
     ##  iterators     * 1.0.14     2022-02-05 [1] CRAN (R 4.2.3)
-    ##  jomo            2.7-6      2023-04-15 [1] CRAN (R 4.2.3)
     ##  jsonlite        1.8.8      2023-12-04 [1] CRAN (R 4.3.2)
     ##  knitr           1.45       2023-10-30 [1] CRAN (R 4.3.2)
     ##  labeling        0.4.3      2023-08-29 [1] CRAN (R 4.3.1)
@@ -1530,22 +1592,16 @@ sessioninfo::session_info()
     ##  lhs             1.1.6      2022-12-17 [1] CRAN (R 4.2.3)
     ##  lifecycle       1.0.4      2023-11-07 [1] CRAN (R 4.3.2)
     ##  listenv         0.9.1      2024-01-29 [1] CRAN (R 4.2.3)
-    ##  lme4            1.1-35.1   2023-11-05 [1] CRAN (R 4.3.2)
     ##  lmtest        * 0.9-40     2022-03-21 [1] CRAN (R 4.2.3)
     ##  lubridate     * 1.9.3      2023-09-27 [1] CRAN (R 4.3.2)
     ##  magrittr        2.0.3      2022-03-30 [1] CRAN (R 4.3.2)
     ##  MASS            7.3-60.0.1 2024-01-13 [2] CRAN (R 4.2.3)
     ##  Matrix        * 1.6-5      2024-01-11 [1] CRAN (R 4.2.3)
-    ##  mice          * 3.16.0     2023-06-05 [1] CRAN (R 4.2.3)
-    ##  minqa           1.2.6      2023-09-11 [1] CRAN (R 4.3.2)
-    ##  mitml           0.4-5      2023-03-08 [1] CRAN (R 4.2.3)
+    ##  memoise         2.0.1      2021-11-26 [1] CRAN (R 4.3.2)
     ##  naniar        * 1.0.0      2023-02-02 [1] CRAN (R 4.3.2)
-    ##  nlme            3.1-164    2023-11-27 [2] CRAN (R 4.2.3)
-    ##  nloptr          2.0.3      2022-05-26 [1] CRAN (R 4.3.2)
     ##  nnet            7.3-19     2023-05-03 [2] CRAN (R 4.2.3)
     ##  nortest         1.0-4      2015-07-30 [1] CRAN (R 4.2.0)
     ##  pacman          0.5.1      2019-03-11 [1] CRAN (R 4.2.3)
-    ##  pan             1.9        2023-08-21 [1] CRAN (R 4.2.3)
     ##  parallelly      1.37.1     2024-02-29 [1] CRAN (R 4.2.3)
     ##  parsnip       * 1.2.1      2024-03-22 [1] CRAN (R 4.2.3)
     ##  pillar          1.9.0      2023-03-22 [1] CRAN (R 4.3.2)
