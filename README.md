@@ -31,7 +31,7 @@ scripts were version-controlled and documented to ensure reproducibility of the 
 and results.
 
 ---
-## Repository Structure
+### Repository Structure
 ├── Predicting-Depression-Severity_files/figure-gfm/ # Auto-generated plots  
 ├── data/ # Source dataset  
 ├── .gitignore  
